@@ -1,7 +1,8 @@
 # DotaCore ⚔️
+[![CI Tests](https://github.com/Ridwan0110/dotacore/actions/workflows/ci.yml/badge.svg)](https://github.com/Ridwan0110/dotacore/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/license/mit/)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/Ridwan0110/redu_logger/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/Ridwan0110/dotacore/releases)
 [![GitHub](https://img.shields.io/badge/source-GitHub-blue?logo=github)](https://github.com/Ridwan0110/dotacore)
 
 A modern, interactive Python CLI utility to look up match scoreboards, download, and decompress Dota 2 match replays (`.dem`) directly from Valve's CDN servers using the OpenDota API.

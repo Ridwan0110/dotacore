@@ -24,6 +24,9 @@ Welcome to the **DotaCore** codebase. This guide provides AI agents and human de
 
 ```text
 dotacore/
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions matrix CI (Ubuntu, Windows, macOS across Python 3.11-3.13)
 ├── main.py                     # CLI entry point; initializes and runs DotaCoreApp
 ├── README.md                   # User-facing documentation and Dota 2 console instructions
 ├── requirements.txt            # Package dependencies (requests, zstandard for Python < 3.14)
