@@ -2,9 +2,9 @@ name: CI Tests
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "redu-dev" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "redu-dev" ]
   workflow_dispatch:
 
 jobs:
