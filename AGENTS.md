@@ -23,12 +23,21 @@ Welcome to the **DotaCore** codebase. This guide provides AI agents and human de
 ## 2. Directory Layout & Module Responsibilities
 
 ```text
-dota_replay_downloader/
+dotacore/
 ├── main.py                     # CLI entry point; initializes and runs DotaCoreApp
 ├── README.md                   # User-facing documentation and Dota 2 console instructions
 ├── requirements.txt            # Package dependencies (requests, zstandard for Python < 3.14)
+├── requirements-dev.txt        # Development dependencies (pytest)
+├── pytest.ini                  # Pytest configuration and defaults
 ├── .gitignore                  # Ignores pyvenv, replays, __pycache__, and cache files
 ├── replays/                    # Default download destination for match replay files
+├── tests/                      # Pytest test suite covering all units and edge cases
+│   ├── test_models.py          # PlayerScore, MatchDetails, ReplaySource
+│   ├── test_ui.py              # Parsing, formatting, colors, scoreboard rendering
+│   ├── test_downloader.py      # Decompression (zstd, bz2, gz, raw), downloads, headers
+│   ├── test_api.py             # OpenDota endpoints, parse polling, error handling
+│   ├── test_game_finder.py     # Steam library detection & version compatibility
+│   └── test_app.py             # Application flow integration tests
 └── dotacore/                   # Core Python package
     ├── __init__.py             # Package definition and __version__
     ├── config.py               # Constants, timeouts, URLs, and default paths
@@ -105,50 +114,26 @@ Dota 2 replays are input recordings, not video files. Matches recorded on major 
 ```powershell
 # Windows
 .\pyvenv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Linux / macOS
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-### Quick Verification Commands
-When modifying code, run these targeted commands to verify components without re-downloading large files over the network:
+### Running the Pytest Test Suite
+To run the full suite of unit and integration tests:
+```bash
+pytest
+```
 
-1. **Verify Imports & Syntax**:
-   ```bash
-   python -c "import dotacore; from dotacore.app import DotaCoreApp; print('OK v', dotacore.__version__)"
-   ```
-
-2. **Verify Match URL / ID Parsing**:
-   ```bash
-   python -c "from dotacore.ui import TerminalUI; assert TerminalUI.parse_match_input('https://www.dotabuff.com/matches/9032315904') == 9032315904; print('OK')"
-   ```
-
-3. **Verify Header Inspector on an Existing Replay**:
-   ```bash
-   python -c "from pathlib import Path; from dotacore.downloader import Downloader; print(Downloader.inspect_demo_header(Path('replays/9032315904_1640825826.dem')))"
-   ```
-
-4. **Verify Decompression Pipeline**:
-   ```bash
-   python -c "import bz2, tempfile; from pathlib import Path; from dotacore.downloader import Downloader; d = Downloader(); t = Path(tempfile.mkdtemp()) / 'test.bz2'; t.write_bytes(bz2.compress(b'PBDEMS2_TEST')); out = d.decompress(t, delete_archive=True); assert out.read_bytes() == b'PBDEMS2_TEST'; print('OK')"
-   ```
-
-5. **Verify Dota 2 Path Discovery & steam.inf Reading**:
-   ```bash
-   python -c "from dotacore.game_finder import DotaGameFinder; p = DotaGameFinder.find_installation(); print('Dota Path:', p); print('steam.inf:', DotaGameFinder.read_steam_inf(p) if p else 'N/A')"
-   ```
-
-6. **Automated Non-Interactive CLI Run**:
-   Piping input into `main.py` tests user prompt flows without hanging:
-   ```powershell
-   # Quick exit check
-   "q" | python main.py
-
-   # Single match lookup without downloading
-   "9032315904`ny`nn" | python main.py
-   ```
+The test suite covers:
+- **`test_models.py`**: Model calculation, formatting, and filtering.
+- **`test_ui.py`**: Regex parsing for match IDs/URLs, formatting, terminal styling, and scoreboard tables.
+- **`test_downloader.py`**: Format detection, Zstandard/BZip2/GZip decompression, streaming download, expired replay error handling, and binary `.dem` header inspection.
+- **`test_api.py`**: OpenDota API client endpoints, rate limiting, timeout handling, parse job enqueuing, and CDN status checks.
+- **`test_game_finder.py`**: Steam library location, `steam.inf` parsing, and version compatibility evaluation.
+- **`test_app.py`**: End-to-end interactive CLI controller flows.
 
 ---
 
