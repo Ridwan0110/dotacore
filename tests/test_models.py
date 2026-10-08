@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dotacore.models import MatchDetails, PlayerScore, ReplaySource
+from backend.models import MatchDetails, PlayerScore, ReplaySource
 
 
 def test_player_score_properties():

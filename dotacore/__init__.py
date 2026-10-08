@@ -1,3 +1,3 @@
-"""DotaCore Package."""
+"""DotaCore compatibility package forwarding to backend and frontend."""
 
-__version__ = "0.1.0"
+from backend import *

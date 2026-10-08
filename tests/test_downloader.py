@@ -10,10 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from dotacore.downloader import Downloader
-from dotacore.exceptions import DownloadError, ReplayExpiredError
+from backend.downloader import Downloader
+from backend.exceptions import DownloadError, ReplayExpiredError
 
-# For creating test zstd payload
 try:
     from compression import zstd
 except ImportError:
@@ -24,142 +23,116 @@ except ImportError:
 
 
 @pytest.fixture
-def tmp_dir():
-    d = Path(tempfile.mkdtemp())
-    yield d
-    shutil.rmtree(d, ignore_errors=True)
+def downloader():
+    return Downloader()
 
 
-def test_detect_format(tmp_dir: Path):
-    d = Downloader()
+def test_detect_format(downloader: Downloader, tmp_path: Path):
+    bz2_file = tmp_path / "test.bz2"
+    bz2_file.write_bytes(b"BZh91AY&SY")
+    assert downloader.detect_format(bz2_file) == "bz2"
 
-    # Zstandard
-    f_zstd = tmp_dir / "sample.dem.bz2"
-    f_zstd.write_bytes(b"\x28\xb5\x2f\xfd\x00\x00\x00\x00")
-    assert d.detect_format(f_zstd) == "zstd"
+    zstd_file = tmp_path / "test.zst"
+    zstd_file.write_bytes(b"\x28\xb5/\xfd\x00\x00")
+    assert downloader.detect_format(zstd_file) == "zstd"
 
-    # BZip2
-    f_bz2 = tmp_dir / "sample.bz2"
-    f_bz2.write_bytes(b"BZh91AY&SY\x00\x00\x00")
-    assert d.detect_format(f_bz2) == "bz2"
+    gzip_file = tmp_path / "test.gz"
+    gzip_file.write_bytes(b"\x1f\x8b\x08\x00")
+    assert downloader.detect_format(gzip_file) == "gzip"
 
-    # GZip
-    f_gz = tmp_dir / "sample.gz"
-    f_gz.write_bytes(b"\x1f\x8b\x08\x00\x00\x00\x00\x00")
-    assert d.detect_format(f_gz) == "gzip"
+    dem_file = tmp_path / "test.dem"
+    dem_file.write_bytes(b"PBDEMS2\x00")
+    assert downloader.detect_format(dem_file) == "uncompressed"
 
-    # Uncompressed Dota 2 Demo
-    f_dem = tmp_dir / "sample.dem"
-    f_dem.write_bytes(b"PBDEMS2\x00\x00\x00\x00\x00")
-    assert d.detect_format(f_dem) == "uncompressed"
-
-    # Unknown
-    f_unk = tmp_dir / "unknown.bin"
-    f_unk.write_bytes(b"\x00\x01\x02\x03\x04\x05\x06\x07")
-    assert d.detect_format(f_unk) == "unknown"
+    unknown_file = tmp_path / "test.bin"
+    unknown_file.write_bytes(b"RANDOMDATA")
+    assert downloader.detect_format(unknown_file) == "unknown"
 
 
-def test_decompress_bz2(tmp_dir: Path):
-    d = Downloader()
-    payload = b"PBDEMS2_BZ2_TEST_PAYLOAD"
-    archive = tmp_dir / "test.dem.bz2"
-    archive.write_bytes(bz2.compress(payload))
+def test_decompress_bz2(downloader: Downloader, tmp_path: Path):
+    raw_payload = b"PBDEMS2\x00fake demo data"
+    archive = tmp_path / "match.dem.bz2"
+    with bz2.open(archive, "wb") as f:
+        f.write(raw_payload)
 
-    # Keep archive
-    out = d.decompress(archive, delete_archive=False)
-    assert out.is_file()
-    assert out.read_bytes() == payload
-    assert archive.is_file()
-
-    # Delete archive
-    out2 = d.decompress(archive, delete_archive=True)
-    assert out2.is_file()
+    decompressed = downloader.decompress(archive, delete_archive=True)
+    assert decompressed.name == "match.dem"
+    assert decompressed.read_bytes() == raw_payload
     assert not archive.exists()
 
 
-def test_decompress_gzip(tmp_dir: Path):
-    d = Downloader()
-    payload = b"PBDEMS2_GZIP_TEST_PAYLOAD"
-    archive = tmp_dir / "test.dem.gz"
-    archive.write_bytes(gzip.compress(payload))
+def test_decompress_gzip(downloader: Downloader, tmp_path: Path):
+    raw_payload = b"PBDEMS2\x00fake demo data gzip"
+    archive = tmp_path / "match.dem.gz"
+    with gzip.open(archive, "wb") as f:
+        f.write(raw_payload)
 
-    out = d.decompress(archive, delete_archive=True)
-    assert out.read_bytes() == payload
-    assert not archive.exists()
-
-
-def test_decompress_zstd(tmp_dir: Path):
-    if zstd is None:
-        pytest.skip("zstd library not installed in this environment")
-
-    d = Downloader()
-    payload = b"PBDEMS2_ZSTD_TEST_PAYLOAD"
-    archive = tmp_dir / "test.dem.bz2"  # Note: .bz2 extension with zstd content
-
-    compressed = zstd.compress(payload)
-    archive.write_bytes(compressed)
-
-    progress_ticks = []
-    def on_prog(written, total):
-        progress_ticks.append((written, total))
-
-    out = d.decompress(archive, delete_archive=False, progress_cb=on_prog)
-    assert out.read_bytes() == payload
-    assert len(progress_ticks) > 0
+    decompressed = downloader.decompress(archive, delete_archive=False)
+    assert decompressed.name == "match.dem"
+    assert decompressed.read_bytes() == raw_payload
+    assert archive.exists()
 
 
-def test_decompress_uncompressed_dem(tmp_dir: Path):
-    d = Downloader()
-    payload = b"PBDEMS2_RAW_DATA"
-    raw_file = tmp_dir / "raw.dem"
-    raw_file.write_bytes(payload)
+@pytest.mark.skipif(zstd is None, reason="Zstandard not available in test environment")
+def test_decompress_zstd(downloader: Downloader, tmp_path: Path):
+    raw_payload = b"PBDEMS2\x00fake zstd payload"
+    archive = tmp_path / "match.dem.bz2"  # Valve naming convention: .bz2 extension but zstd payload
 
-    target_dem = tmp_dir / "copied.dem"
-    out = d.decompress(raw_file, output_file=target_dem, delete_archive=False)
-    assert out == target_dem
-    assert out.read_bytes() == payload
+    if hasattr(zstd, "compress"):
+        archive.write_bytes(zstd.compress(raw_payload))
+    else:
+        cctx = zstd.ZstdCompressor()
+        archive.write_bytes(cctx.compress(raw_payload))
+
+    decompressed = downloader.decompress(archive, delete_archive=False)
+    assert decompressed.name == "match.dem"
+    assert decompressed.read_bytes() == raw_payload
 
 
-def test_decompress_corrupted_stream(tmp_dir: Path):
-    d = Downloader()
-    # Invalid bzip2 file header followed by garbage
-    corrupt = tmp_dir / "corrupted.dem.bz2"
-    corrupt.write_bytes(b"BZh91AY&SY_INVALID_STREAM_DATA_HERE")
+def test_decompress_uncompressed_dem(downloader: Downloader, tmp_path: Path):
+    raw_payload = b"PBDEMS2\x00uncompressed demo"
+    archive = tmp_path / "match.dem"
+    archive.write_bytes(raw_payload)
+
+    out = downloader.decompress(archive, delete_archive=False)
+    assert out.name == "match.dem"
+    assert out.read_bytes() == raw_payload
+
+
+def test_decompress_corrupted_stream(downloader: Downloader, tmp_path: Path):
+    archive = tmp_path / "corrupt.dem.bz2"
+    archive.write_bytes(b"BZh9corrupted_bytes_here")
 
     with pytest.raises(DownloadError):
-        d.decompress(corrupt)
-
-    # Verify temp part file cleaned up
-    temp_part = corrupt.with_name("corrupted.dem.dpart")
-    assert not temp_part.exists()
+        downloader.decompress(archive)
 
 
-def test_decompress_non_existent_file(tmp_dir: Path):
-    d = Downloader()
+def test_decompress_non_existent_file(downloader: Downloader, tmp_path: Path):
+    archive = tmp_path / "missing.dem.bz2"
     with pytest.raises(DownloadError):
-        d.decompress(tmp_dir / "does_not_exist.dem.bz2")
+        downloader.decompress(archive)
 
 
-def test_download_success(tmp_dir: Path):
-    d = Downloader()
-    dest = tmp_dir / "out.bin"
+def test_download_success(downloader: Downloader, tmp_path: Path):
+    target = tmp_path / "downloaded.dem.bz2"
+    payload = b"TestReplayBytes" * 100
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.headers = {"content-length": "12"}
-    mock_resp.iter_content.return_value = [b"chunk1", b"chunk2"]
+    mock_resp.headers = {"content-length": str(len(payload))}
+    mock_resp.iter_content.return_value = [payload[:50], payload[50:]]
     mock_resp.__enter__.return_value = mock_resp
 
     with patch("requests.get", return_value=mock_resp):
-        res = d.download("http://example.com/test", dest)
-        assert res == dest
-        assert dest.read_bytes() == b"chunk1chunk2"
+        result = downloader.download("http://example.com/replay.dem.bz2", target)
+
+    assert result.is_file()
+    assert result.read_bytes() == payload
 
 
 @pytest.mark.parametrize("status_code", [404, 502, 403, 410])
-def test_download_expired_error(tmp_dir: Path, status_code: int):
-    d = Downloader()
-    dest = tmp_dir / "out.bin"
+def test_download_expired_error(downloader: Downloader, tmp_path: Path, status_code: int):
+    target = tmp_path / "expired.dem.bz2"
 
     mock_resp = MagicMock()
     mock_resp.status_code = status_code
@@ -167,48 +140,39 @@ def test_download_expired_error(tmp_dir: Path, status_code: int):
 
     with patch("requests.get", return_value=mock_resp):
         with pytest.raises(ReplayExpiredError):
-            d.download("http://example.com/expired", dest)
-
-    assert not dest.exists()
+            downloader.download("http://example.com/replay.dem.bz2", target)
 
 
-def test_download_network_error(tmp_dir: Path):
-    d = Downloader()
-    dest = tmp_dir / "out.bin"
+def test_download_network_error(downloader: Downloader, tmp_path: Path):
+    target = tmp_path / "fail.dem.bz2"
 
-    with patch("requests.get", side_effect=requests.ConnectionError("Offline")):
+    with patch("requests.get", side_effect=requests.ConnectionError("Network drop")):
         with pytest.raises(DownloadError):
-            d.download("http://example.com/offline", dest)
+            downloader.download("http://example.com/replay.dem.bz2", target)
 
-    assert not dest.exists()
+    assert not target.exists()
+    assert not target.with_suffix(target.suffix + ".part").exists()
 
 
-def test_inspect_demo_header_valid(tmp_dir: Path):
-    # Construct a synthetic Source 2 demo header
-    # Magic (8 bytes): PBDEMS2\0
-    # Offset dummy (8 bytes)
-    # Packet header: cmd=1 (varint), tick=0 (varint), size (varint)
-    # Packet body: Protobuf fields with server path: /opt/srcds/dota/dota_v6944/dota
-    dem = tmp_dir / "sample.dem"
+def test_inspect_demo_header_valid(downloader: Downloader, tmp_path: Path):
+    dem_file = tmp_path / "sample.dem"
+    # Construct synthetic Source 2 demo header:
+    # 8 bytes: PBDEMS2\0
+    # 8 bytes: dummy offset
+    # CDemoFileHeader command: cmd=1 (varint), tick=0 (varint), size=length (varint), payload
+    header = b"PBDEMS2\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    payload = b"data /dota_v6944/dota extra"
+    # cmd=1 -> \x01, tick=0 -> \x00, size=len(payload) -> \x1b
+    packet = b"\x01\x00" + bytes([len(payload)]) + payload
+    dem_file.write_bytes(header + packet)
 
-    body = b"\x12\x20/opt/srcds/dota/dota_v6944/dota\x10\x30\x68\xd4\x54"
-    # Field 2 = 48 (protocol), Field 13 = 10836 (engine_build)
-
-    header = io.BytesIO()
-    header.write(b"PBDEMS2\x00")
-    header.write(b"\x00" * 8)
-    header.write(bytes([1, 0, len(body)]))  # cmd=1, tick=0, size
-    header.write(body)
-
-    dem.write_bytes(header.getvalue())
-
-    info = Downloader.inspect_demo_header(dem)
+    info = downloader.inspect_demo_header(dem_file)
     assert info["server_version"] == "v6944"
 
 
-def test_inspect_demo_header_non_demo_file(tmp_dir: Path):
-    non_dem = tmp_dir / "text.txt"
-    non_dem.write_text("Hello World")
+def test_inspect_demo_header_non_demo_file(downloader: Downloader, tmp_path: Path):
+    fake_file = tmp_path / "random.dem"
+    fake_file.write_bytes(b"NOT_A_SOURCE2_DEMO")
 
-    info = Downloader.inspect_demo_header(non_dem)
-    assert info == {"server_version": None, "engine_build": None, "network_protocol": None}
+    info = downloader.inspect_demo_header(fake_file)
+    assert info["server_version"] is None

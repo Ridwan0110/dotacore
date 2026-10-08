@@ -6,14 +6,16 @@ Welcome to the **DotaCore** codebase. This guide provides AI agents and human de
 
 ## 1. Project Overview & Philosophy
 
-**DotaCore** is an interactive CLI utility for Dota 2 players and analysts that:
+**DotaCore** is an interactive application and backend utility for Dota 2 players and analysts that:
 1. Queries match metadata and 10-player scoreboards via the **OpenDota API**.
-2. Displays formatted match overview cards and full player statistics in the terminal.
+2. Displays formatted match overview cards and full player statistics across plug-and-play frontends (CLI, and future GUI/Web interfaces).
 3. Verifies availability on Valve's edge CDN servers and downloads replay archives (`.dem.bz2` / `.dem.zst`).
 4. Transparently detects compression algorithms via binary magic bytes (handling Valve's modern Zstandard stream format) and decompresses them into Source 2 `.dem` demos.
 5. Locates the local Dota 2 installation across Windows, Linux, and macOS, checks version compatibility against the local `steam.inf`, and copies the replay directly into `game/dota/replays/`.
 
 ### Core Design Rules
+* **Decoupled Architecture**: The `backend/` package is completely independent of the frontend/UI. The `frontend/` package depends on the backend.
+* **Plug-and-Play Frontends**: UIs implement the `backend.interfaces.BaseUI` contract and can be registered in `frontend.registry` (`cli`, `web`, `gui`, etc.).
 * **Single-Run Interactive Experience**: After processing a match ID (or exiting early), the CLI finishes and exits cleanly. It does **not** loop or ask the user if they want to process another match.
 * **Non-Blocking / Graceful Degradation**: If an older match replay has expired on Valve's servers, the CLI still renders the full match card and player scoreboard while advising the user about Valve's retention window.
 * **Safe Terminal Output**: Windows consoles default to legacy encodings (like `cp1252`). All terminal output is guarded via `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` and ASCII/ANSI fallbacks to avoid `UnicodeEncodeError`.
@@ -26,54 +28,60 @@ Welcome to the **DotaCore** codebase. This guide provides AI agents and human de
 dotacore/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml              # GitHub Actions matrix CI (Ubuntu, Windows, macOS across Python 3.11-3.13)
-├── main.py                     # CLI entry point; initializes and runs DotaCoreApp
+│       └── ci.yml              # GitHub Actions matrix CI (Ubuntu, Windows, macOS across Python 3.8, 3.11)
+├── main.py                     # Application entry point; supports --ui {cli, ...}
 ├── README.md                   # User-facing documentation and Dota 2 console instructions
 ├── requirements.txt            # Package dependencies (requests, zstandard for Python < 3.14)
 ├── requirements-dev.txt        # Development dependencies (pytest)
 ├── pytest.ini                  # Pytest configuration and defaults
 ├── .gitignore                  # Ignores pyvenv, replays, __pycache__, and cache files
 ├── replays/                    # Default download destination for match replay files
-├── tests/                      # Pytest test suite covering all units and edge cases
+├── tests/                      # Pytest test suite covering backend, frontend, models, and registry
 │   ├── test_models.py          # PlayerScore, MatchDetails, ReplaySource
 │   ├── test_ui.py              # Parsing, formatting, colors, scoreboard rendering
 │   ├── test_downloader.py      # Decompression (zstd, bz2, gz, raw), downloads, headers
 │   ├── test_api.py             # OpenDota endpoints, parse polling, error handling
 │   ├── test_game_finder.py     # Steam library detection & version compatibility
-│   └── test_app.py             # Application flow integration tests
-└── dotacore/                   # Core Python package
-    ├── __init__.py             # Package definition and __version__
-    ├── config.py               # Constants, timeouts, URLs, and default paths
-    ├── exceptions.py           # Domain exception hierarchy (DotaCoreError base)
-    ├── models.py               # Dataclasses: MatchDetails, PlayerScore, ReplaySource
-    ├── api.py                  # OpenDota API client and Valve CDN status checker
-    ├── downloader.py           # Streaming chunk downloader, decompressor, and .dem header inspector
-    ├── game_finder.py          # Cross-platform Steam / Dota 2 installation discovery and version check
-    ├── ui.py                   # Terminal rendering: ANSI styles, match card, scoreboard table, progress bar
-    ├── app.py                  # Orchestrator / state controller managing user prompts and execution flow
-    └── .constants_cache.json   # Auto-generated cache for hero and item ID-to-name definitions
+│   ├── test_app.py             # CLI application flow integration tests
+│   ├── test_service.py         # DotaCoreService, WorkflowEngine, and backend independence checks
+│   └── test_registry.py       # Plug-and-play UI registration and dispatch tests
+├── backend/                    # Independent backend package (zero frontend dependencies)
+│   ├── __init__.py             # Exports models, services, exceptions, downloader, game-finder
+│   ├── config.py               # Constants, timeouts, URLs, and default paths
+│   ├── exceptions.py           # Domain exception hierarchy (DotaCoreError base)
+│   ├── models.py               # Dataclasses: MatchDetails, PlayerScore, ReplaySource
+│   ├── api.py                  # OpenDota API client and Valve CDN status checker
+│   ├── downloader.py           # Streaming chunk downloader, decompressor, and .dem header inspector
+│   ├── game_finder.py          # Cross-platform Steam / Dota 2 installation discovery and version check
+│   ├── interfaces.py           # BaseUI abstract interface for plug-and-play UI frontends
+│   ├── service.py              # Headless DotaCoreService API
+│   ├── workflow.py             # Headless WorkflowEngine orchestrating BaseUI and DotaCoreService
+│   └── .constants_cache.json   # Auto-generated cache for hero and item ID-to-name definitions
+├── frontend/                   # Frontend package (dependent on backend)
+│   ├── __init__.py             # Exports registry helpers and CLI components
+│   ├── registry.py             # Plug-and-play UI registry (register_ui, get_ui, launch_ui)
+│   └── cli/                    # CLI frontend implementation
+│       ├── __init__.py
+│       ├── styles.py           # ANSI color styles and text painter
+│       ├── ui.py               # TerminalUI implementing BaseUI
+│       └── app.py              # CLIApp / DotaCoreApp runner
+└── dotacore/                   # Backward-compatibility shims forwarding to backend & frontend
 ```
 
 ### Detailed Module Descriptions
 
-- **`dotacore/config.py`**:
-  Stores base URLs (`OPENDOTA_BASE_URL`), User-Agent (`DotaCore/2.0`), network timeouts, poll intervals for match parsing, and the Valve retention threshold (`VALVE_EXPIRY_THRESHOLD_DAYS = 14`).
-- **`dotacore/exceptions.py`**:
-  Defines `DotaCoreError` and specific subclasses: `MatchNotFoundError`, `ReplayExpiredError`, `ReplayNotAvailableError`, `RateLimitExceededError`, `NetworkError`, `DownloadError`, and `ParseTimeoutError`.
-- **`dotacore/models.py`**:
-  - `PlayerScore`: Player stats (K/D/A, LH/DN, Net Worth, GPM/XPM, 6 items, neutral item).
-  - `MatchDetails`: Match-level metadata, durations, radiant/dire scores, game mode, lobby type, patch info, and player lists.
-  - `ReplaySource`: Download URL, cluster, replay salt, and filename resolvers.
-- **`dotacore/api.py`**:
-  `OpenDotaClient` handles `GET /matches/{id}`, `GET /replays`, `POST /request/{id}`, `GET /request/{job_id}`, and `GET /constants/patch`. Fetches and caches hero/item dictionaries to disk. Also conducts `HEAD` probes against Valve's replay CDN (`replay{cluster}.valve.net`).
-- **`dotacore/downloader.py`**:
-  `Downloader` handles streaming HTTP GET requests with live progress callbacks. Contains `detect_format()` to determine compression from file magic bytes, `decompress()` supporting Zstandard, BZip2, and GZip, and `inspect_demo_header()` which parses Source 2 demo binary headers.
-- **`dotacore/game_finder.py`**:
-  `DotaGameFinder` locates Dota 2 installations on Windows (Registry + multi-drive scans + `libraryfolders.vdf`), Linux (`~/.local/share/Steam`, Flatpak, Snap), and macOS (`~/Library/Application Support/Steam`). Reads `steam.inf` to obtain `ClientVersion` and compares against the replay's build tag (`vXXXX`).
-- **`dotacore/ui.py`**:
-  `TerminalUI` and `Style` handle ANSI coloring, input prompts, regex-based match ID / URL parsing, match cards, full scoreboard tables, and progress bars.
-- **`dotacore/app.py`**:
-  `DotaCoreApp` drives the single-match interactive session: match selection -> card view -> scoreboard prompt -> download prompt -> decompression -> game folder copy.
+- **`backend/interfaces.py`**:
+  Defines `BaseUI`, the contract that all UI implementations must fulfill to plug into `WorkflowEngine`.
+- **`backend/service.py`**:
+  `DotaCoreService` provides a headless Python API for match inspection, downloading, decompression, and game folder integration without requiring any terminal or UI.
+- **`backend/workflow.py`**:
+  `WorkflowEngine` runs the interactive match workflow using an injected `BaseUI` implementation and `DotaCoreService`.
+- **`frontend/registry.py`**:
+  Central UI plugin registry. Allows registering new frontends (e.g. `register_ui("web", WebApp)`) and launching them dynamically via `launch_ui()`.
+- **`frontend/cli/ui.py`**:
+  `TerminalUI` implements `BaseUI` for rich ANSI terminal rendering, player tables, progress bars, and input prompts.
+- **`frontend/cli/app.py`**:
+  `CLIApp` wires `TerminalUI` and `DotaCoreService` into `WorkflowEngine` for command-line execution.
 
 ---
 
@@ -130,19 +138,12 @@ To run the full suite of unit and integration tests:
 pytest
 ```
 
-The test suite covers:
-- **`test_models.py`**: Model calculation, formatting, and filtering.
-- **`test_ui.py`**: Regex parsing for match IDs/URLs, formatting, terminal styling, and scoreboard tables.
-- **`test_downloader.py`**: Format detection, Zstandard/BZip2/GZip decompression, streaming download, expired replay error handling, and binary `.dem` header inspection.
-- **`test_api.py`**: OpenDota API client endpoints, rate limiting, timeout handling, parse job enqueuing, and CDN status checks.
-- **`test_game_finder.py`**: Steam library location, `steam.inf` parsing, and version compatibility evaluation.
-- **`test_app.py`**: End-to-end interactive CLI controller flows.
-
 ---
 
 ## 5. Coding Standards & Conventions
 
-1. **Type Hints**: Use standard type annotations (`from __future__ import annotations`, `Optional`, `tuple`, `list`, `Path`).
-2. **Error Handling**: Raise domain exceptions defined in `exceptions.py` rather than generic `Exception` or `RuntimeError`.
-3. **No External Heavy Dependencies**: Keep the project lightweight. Avoid heavy protobuf compilation libraries or pandas; use standard library modules (`struct`, `io`, `re`, `json`, `pathlib`, `bz2`, `gzip`, `compression.zstd`) wherever possible.
-4. **Preserve User Autonomy**: The CLI should inform and advise (e.g. warning on version mismatch), but allow the user to make the final choice when copying or downloading.
+1. **Backend Independence**: Modules under `backend/` must never import from `frontend/` or UI modules.
+2. **Type Hints**: Use standard type annotations (`from __future__ import annotations`, `Optional`, `tuple`, `list`, `Path`).
+3. **Error Handling**: Raise domain exceptions defined in `backend.exceptions` rather than generic `Exception` or `RuntimeError`.
+4. **No External Heavy Dependencies**: Keep the project lightweight. Avoid heavy protobuf compilation libraries or pandas; use standard library modules (`struct`, `io`, `re`, `json`, `pathlib`, `bz2`, `gzip`, `compression.zstd`) wherever possible.
+5. **Preserve User Autonomy**: The CLI should inform and advise (e.g. warning on version mismatch), but allow the user to make the final choice when copying or downloading.

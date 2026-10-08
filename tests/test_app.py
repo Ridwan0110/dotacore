@@ -5,22 +5,22 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-from dotacore.app import DotaCoreApp
-from dotacore.models import MatchDetails, PlayerScore, ReplaySource
+from backend.models import MatchDetails, PlayerScore, ReplaySource
+from frontend.cli.app import CLIApp, DotaCoreApp
 
 
 @pytest.fixture
 def app():
-    return DotaCoreApp()
+    return CLIApp()
 
 
-def test_app_quit_immediately(app: DotaCoreApp):
-    with patch("dotacore.ui.TerminalUI.prompt_input", return_value="q"):
+def test_app_quit_immediately(app: CLIApp):
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="q"):
         # Should exit gracefully without raising or attempting API calls
         app._run_single_match()
 
 
-def test_app_expired_match_flow(app: DotaCoreApp, capsys):
+def test_app_expired_match_flow(app: CLIApp, capsys):
     # Match from 100 days ago (older than 14 days threshold)
     mock_match = MatchDetails(
         match_id=1234567,
@@ -50,8 +50,8 @@ def test_app_expired_match_flow(app: DotaCoreApp, capsys):
     )
 
     with patch.object(app.api, "fetch_match", return_value=mock_match), \
-         patch("dotacore.ui.TerminalUI.prompt_input", return_value="1234567"), \
-         patch("dotacore.ui.TerminalUI.prompt_confirm", side_effect=[True]):  # view scoreboard = True
+         patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="1234567"), \
+         patch("frontend.cli.ui.TerminalUI.prompt_confirm", side_effect=[True]):  # view scoreboard = True
 
         app._run_single_match()
 
@@ -61,7 +61,7 @@ def test_app_expired_match_flow(app: DotaCoreApp, capsys):
     assert "Valve purges replay files" in captured
 
 
-def test_app_successful_download_and_copy(app: DotaCoreApp, tmp_path: Path):
+def test_app_successful_download_and_copy(app: CLIApp, tmp_path: Path):
     mock_match = MatchDetails(
         match_id=9032315904,
         duration_seconds=3600,
@@ -91,10 +91,10 @@ def test_app_successful_download_and_copy(app: DotaCoreApp, tmp_path: Path):
          patch.object(app.downloader, "detect_format", return_value="zstd"), \
          patch.object(app.downloader, "decompress", return_value=fake_dem), \
          patch.object(app.downloader, "inspect_demo_header", return_value={"server_version": "v6944", "engine_build": 10836}), \
-         patch("dotacore.game_finder.DotaGameFinder.find_installation", return_value=mock_dota_dir), \
-         patch("dotacore.game_finder.DotaGameFinder.read_steam_inf", return_value={"clientversion": "6944"}), \
-         patch("dotacore.ui.TerminalUI.prompt_input", side_effect=["9032315904", str(tmp_path)]), \
-         patch("dotacore.ui.TerminalUI.prompt_confirm", side_effect=[
+         patch("backend.game_finder.DotaGameFinder.find_installation", return_value=mock_dota_dir), \
+         patch("backend.game_finder.DotaGameFinder.read_steam_inf", return_value={"clientversion": "6944"}), \
+         patch("frontend.cli.ui.TerminalUI.prompt_input", side_effect=["9032315904", str(tmp_path)]), \
+         patch("frontend.cli.ui.TerminalUI.prompt_confirm", side_effect=[
              False,  # View scoreboard
              True,   # Download replay
              True,   # Decompress to .dem

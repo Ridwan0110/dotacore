@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from dotacore.game_finder import DotaGameFinder
+from backend.game_finder import DotaGameFinder
 
 
 def test_read_steam_inf():

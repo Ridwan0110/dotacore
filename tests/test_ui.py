@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 import pytest
-from dotacore.models import MatchDetails, PlayerScore
-from dotacore.ui import TerminalUI, paint, Style
+from backend.models import MatchDetails, PlayerScore
+from frontend.cli import Style, TerminalUI, paint
 
 
 @pytest.mark.parametrize(
