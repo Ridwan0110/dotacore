@@ -1,3 +1,23 @@
+## Version: v0.2.0
+
+Release v0.2.0 introduces player profile match history lookup, dedicated CLI navigation flags, cleanup of legacy compatibility packages, and expanded test coverage.
+
+## Added
+- Player profile lookup and recent match history browsing across backend services and CLI (feature)
+- Command-line arguments `--profile` and `--match` for direct profile and match queries (feature)
+- Interactive match history browsing with pagination and selection prompts in the terminal UI (feature)
+- Automated unit and integration test coverage for player profile lookup flows (improvement)
+- Known issues tracking documentation in `docs/BUGS.md` (misc)
+- AI agent workflow instructions in `docs/Agent Instructions` (misc)
+
+## Removed
+- Legacy `dotacore` shim package and backward-compatibility layers (improvement)
+- Deprecated `DotaCoreApp` references across frontend modules and tests (improvement)
+
+## Changed
+- Project task backlog and roadmap in `docs/TODO.md` (misc)
+- Repository file exclusions in `.gitignore` (misc)
+
 ## Version: v0.1.0
 
 Initial release of DotaCore, an interactive command-line utility to query Dota 2 match metadata, inspect 10-player scoreboards, and download and decompress Source 2 match replays directly from Valve CDN servers.
