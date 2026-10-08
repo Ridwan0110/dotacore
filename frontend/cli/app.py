@@ -58,8 +58,6 @@ class CLIApp:
         self.workflow._run_single_match()
 
 
-# Backwards compatibility alias
-DotaCoreApp = CLIApp
 
 
 def run_cli(api_key: Optional[str] = None) -> None:
