@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .cli import CLIApp, DotaCoreApp, Style, TerminalUI, paint, run_cli
+from .cli import CLIApp, Style, TerminalUI, paint, run_cli
 from .registry import get_ui, launch_ui, list_uis, register_ui, unregister_ui
 
 __all__ = [

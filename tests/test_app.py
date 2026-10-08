@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.models import MatchDetails, PlayerScore, ReplaySource
-from frontend.cli.app import CLIApp, DotaCoreApp
+from frontend.cli.app import CLIApp
 
 
 @pytest.fixture
