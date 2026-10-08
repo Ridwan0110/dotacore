@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
-from .models import MatchDetails, ReplaySource
+from .models import MatchDetails, PlayerMatchSummary, ReplaySource
 
 
 class BaseUI(ABC):
@@ -45,8 +45,8 @@ class BaseUI(ABC):
         pass
 
     @abstractmethod
-    def prompt_match_input(self) -> Optional[int]:
-        """Prompt user for match ID or URL, returning parsed integer or None to exit."""
+    def prompt_match_input(self) -> Optional[Union[int, tuple[str, int]]]:
+        """Prompt user for match ID/URL or profile search, returning parsed target or None to exit."""
         pass
 
     @abstractmethod
@@ -89,3 +89,22 @@ class BaseUI(ABC):
     def format_bytes(self, num_bytes: float) -> str:
         """Format raw byte counts to human-readable strings (KB/MB/GB)."""
         pass
+
+    def display_profile_matches(
+        self,
+        matches: list[PlayerMatchSummary],
+        start_index: int = 1,
+    ) -> None:
+        """Display list of player matches showing match ID, date, score, winner."""
+        pass
+
+    def prompt_profile_match_selection(
+        self,
+        total_loaded: int,
+        can_load_more: bool = True,
+    ) -> Optional[Union[int, str]]:
+        """
+        Prompt user to select a match by order (1..total_loaded),
+        or request to load more ('more' / 'm'), or quit ('q' / None).
+        """
+        return None

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from backend.models import MatchDetails, PlayerScore, ReplaySource
+from backend.models import MatchDetails, PlayerMatchSummary, PlayerScore, ReplaySource
 
 
 def test_player_score_properties():
@@ -47,6 +47,40 @@ def test_player_score_properties():
     )
     assert poor_player.net_worth_str == "850"
     assert poor_player.items_summary == "No items"
+
+
+def test_player_match_summary():
+    summary = PlayerMatchSummary(
+        match_id=9032315904,
+        start_time=1700000000,
+        radiant_win=True,
+        radiant_score=35,
+        dire_score=20,
+        kills=8,
+        deaths=2,
+        assists=14,
+    )
+    assert summary.winner_name == "Radiant"
+    assert summary.score_display == "35 - 20"
+    assert summary.date_display == "2023-11-14"
+
+    # Dire win and score fallback
+    dire_summary = PlayerMatchSummary(
+        match_id=9032315905,
+        radiant_win=False,
+        kills=5,
+        deaths=1,
+        assists=10,
+    )
+    assert dire_summary.winner_name == "Dire"
+    assert dire_summary.score_display == "5/1/10"
+    assert dire_summary.date_display == "Unknown"
+
+    # Empty summary
+    empty_summary = PlayerMatchSummary(match_id=123)
+    assert empty_summary.winner_name == "Unknown"
+    assert empty_summary.score_display == "N/A"
+    assert empty_summary.date_display == "Unknown"
 
 
 def test_match_details_properties():

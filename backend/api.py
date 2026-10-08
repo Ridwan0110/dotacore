@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import time
@@ -17,10 +18,11 @@ from .exceptions import (
     MatchNotFoundError,
     NetworkError,
     ParseTimeoutError,
+    ProfileNotFoundError,
     RateLimitExceededError,
     ReplayNotAvailableError,
 )
-from .models import MatchDetails, PlayerScore, ReplaySource
+from .models import MatchDetails, PlayerMatchSummary, PlayerScore, ReplaySource
 
 DEFAULT_PATCH_MAP: dict[int, str] = {
     56: "7.37",
@@ -46,6 +48,7 @@ class OpenDotaClient:
         self._heroes_cache: dict[int, str] = {}
         self._items_cache: dict[int, str] = {}
         self._constants_loaded = False
+        self._match_cache: dict[int, MatchDetails] = {}
         self._cache_file = Path(__file__).parent / ".constants_cache.json"
 
     def _get_url(self, endpoint: str) -> str:
@@ -194,8 +197,34 @@ class OpenDotaClient:
 
         return players
 
+    def _build_match_details(self, match_id: int, payload: dict) -> MatchDetails:
+        """Construct a MatchDetails dataclass from raw OpenDota match response payload."""
+        patch_id = payload.get("patch")
+        patch_name = self.resolve_patch_name(patch_id)
+        players = self._parse_players(payload.get("players", []))
+
+        return MatchDetails(
+            match_id=match_id,
+            duration_seconds=int(payload.get("duration") or 0),
+            radiant_win=payload.get("radiant_win"),
+            radiant_score=payload.get("radiant_score"),
+            dire_score=payload.get("dire_score"),
+            start_time=payload.get("start_time"),
+            game_mode_id=payload.get("game_mode"),
+            lobby_type_id=payload.get("lobby_type"),
+            cluster=payload.get("cluster"),
+            replay_salt=payload.get("replay_salt"),
+            direct_replay_url=payload.get("replay_url"),
+            patch_id=patch_id,
+            patch_name=patch_name,
+            players=players,
+        )
+
     def fetch_match(self, match_id: int) -> MatchDetails:
         """Fetch match metadata and scoreboard from OpenDota."""
+        if match_id in self._match_cache:
+            return self._match_cache[match_id]
+
         url = self._get_url(f"matches/{match_id}")
         try:
             response = self.session.get(
@@ -220,26 +249,96 @@ class OpenDotaClient:
                 "The match might be unparsed or the ID may be invalid."
             )
 
-        patch_id = payload.get("patch")
-        patch_name = self.resolve_patch_name(patch_id)
-        players = self._parse_players(payload.get("players", []))
+        match = self._build_match_details(match_id, payload)
+        self._match_cache[match_id] = match
+        return match
 
-        return MatchDetails(
-            match_id=match_id,
-            duration_seconds=int(payload.get("duration") or 0),
-            radiant_win=payload.get("radiant_win"),
-            radiant_score=payload.get("radiant_score"),
-            dire_score=payload.get("dire_score"),
-            start_time=payload.get("start_time"),
-            game_mode_id=payload.get("game_mode"),
-            lobby_type_id=payload.get("lobby_type"),
-            cluster=payload.get("cluster"),
-            replay_salt=payload.get("replay_salt"),
-            direct_replay_url=payload.get("replay_url"),
-            patch_id=patch_id,
-            patch_name=patch_name,
-            players=players,
-        )
+    def _enrich_match_scores(self, summaries: list[PlayerMatchSummary]) -> None:
+        """Concurrently fetch team scores for match summaries that lack radiant/dire scores."""
+        needed = [s for s in summaries if s.radiant_score is None or s.dire_score is None]
+        if not needed:
+            return
+
+        def fetch_score(summary: PlayerMatchSummary) -> None:
+            if summary.match_id in self._match_cache:
+                cached = self._match_cache[summary.match_id]
+                summary.radiant_score = cached.radiant_score
+                summary.dire_score = cached.dire_score
+                return
+
+            url = self._get_url(f"matches/{summary.match_id}")
+            try:
+                resp = self.session.get(url, params=self._get_params(), timeout=REQUEST_TIMEOUT_SECONDS)
+                if resp.ok:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        summary.radiant_score = data.get("radiant_score")
+                        summary.dire_score = data.get("dire_score")
+                        try:
+                            cached_match = self._build_match_details(summary.match_id, data)
+                            self._match_cache[summary.match_id] = cached_match
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=min(10, len(needed))) as executor:
+            list(executor.map(fetch_score, needed))
+
+    def fetch_player_matches(
+        self,
+        account_id: int,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[PlayerMatchSummary]:
+        """Fetch recent matches played by a player using their 32-bit account ID."""
+        url = self._get_url(f"players/{account_id}/matches")
+        params = self._get_params({
+            "limit": limit,
+            "offset": offset,
+        })
+        try:
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            raise NetworkError(f"Could not reach OpenDota servers: {exc}") from exc
+
+        if response.status_code == 404:
+            raise ProfileNotFoundError(f"Player profile ID {account_id} was not found on OpenDota.")
+        if response.status_code == 429:
+            raise RateLimitExceededError("OpenDota API rate limit reached. Please wait a moment.")
+        if not response.ok:
+            raise NetworkError(f"OpenDota returned unexpected HTTP status {response.status_code}.")
+
+        payload = response.json()
+        if not isinstance(payload, list):
+            return []
+
+        summaries: list[PlayerMatchSummary] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            m_id = item.get("match_id")
+            if m_id is None:
+                continue
+            summaries.append(PlayerMatchSummary(
+                match_id=int(m_id),
+                start_time=item.get("start_time"),
+                radiant_win=item.get("radiant_win"),
+                radiant_score=item.get("radiant_score"),
+                dire_score=item.get("dire_score"),
+                player_slot=item.get("player_slot"),
+                kills=item.get("kills"),
+                deaths=item.get("deaths"),
+                assists=item.get("assists"),
+                hero_id=item.get("hero_id"),
+            ))
+
+        self._enrich_match_scores(summaries)
+        return summaries
 
     def fetch_replay_cluster_fallback(self, match_id: int) -> tuple[Optional[int], Optional[int]]:
         """Query /replays endpoint as a fallback for cluster & replay salt."""

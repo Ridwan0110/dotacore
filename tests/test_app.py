@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-from backend.models import MatchDetails, PlayerScore, ReplaySource
-from frontend.cli.app import CLIApp
+from backend.models import MatchDetails, PlayerMatchSummary, PlayerScore, ReplaySource
+from frontend.cli.app import CLIApp, DotaCoreApp
 
 
 @pytest.fixture
@@ -107,3 +107,80 @@ def test_app_successful_download_and_copy(app: CLIApp, tmp_path: Path):
     # Verify copied file in mock dota replays folder
     copied = mock_dota_dir / "game" / "dota" / "replays" / fake_dem.name
     assert copied.is_file()
+
+
+def test_app_profile_search_and_select_match(app: CLIApp, capsys):
+    mock_summaries = [
+        PlayerMatchSummary(
+            match_id=9000000001 + i,
+            start_time=1700000000 - i * 3600,
+            radiant_win=(i % 2 == 0),
+            radiant_score=30 + i,
+            dire_score=20 + i,
+        )
+        for i in range(10)
+    ]
+    mock_match_details = MatchDetails(
+        match_id=9000000002,
+        duration_seconds=1800,
+        start_time=1000000,
+        radiant_win=False,
+        radiant_score=31,
+        dire_score=21,
+    )
+
+    with patch.object(app.service, "fetch_player_matches", return_value=mock_summaries), \
+         patch.object(app.api, "fetch_match", return_value=mock_match_details), \
+         patch("frontend.cli.ui.TerminalUI.prompt_input", side_effect=["p 86745124", "2"]), \
+         patch("frontend.cli.ui.TerminalUI.prompt_confirm", return_value=False):
+
+        app._run_single_match()
+
+    captured = capsys.readouterr().out
+    assert "Profile Search" in captured
+    assert "Match ID" in captured
+    assert "9000000001" in captured
+    assert "9000000002" in captured
+    assert "Loading match 9000000002 for more information..." in captured
+    assert "Dire Victory" in captured
+
+
+def test_app_profile_search_load_more_matches(app: CLIApp, capsys):
+    batch1 = [
+        PlayerMatchSummary(
+            match_id=9000000001 + i,
+            start_time=1700000000,
+            radiant_win=True,
+            radiant_score=35,
+            dire_score=25,
+        )
+        for i in range(10)
+    ]
+    batch2 = [
+        PlayerMatchSummary(
+            match_id=9000000011 + i,
+            start_time=1690000000,
+            radiant_win=False,
+            radiant_score=20,
+            dire_score=40,
+        )
+        for i in range(5)
+    ]
+    mock_match_details = MatchDetails(
+        match_id=9000000012,
+        duration_seconds=2000,
+        start_time=1000000,
+        radiant_win=False,
+    )
+
+    with patch.object(app.service, "fetch_player_matches", side_effect=[batch1, batch2]), \
+         patch.object(app.api, "fetch_match", return_value=mock_match_details), \
+         patch("frontend.cli.ui.TerminalUI.prompt_input", side_effect=["p 86745124", "m", "12"]), \
+         patch("frontend.cli.ui.TerminalUI.prompt_confirm", return_value=False):
+
+        app._run_single_match()
+
+    captured = capsys.readouterr().out
+    assert "9000000001" in captured
+    assert "9000000012" in captured
+    assert "Loading match 9000000012 for more information..." in captured

@@ -6,6 +6,10 @@ class MatchNotFoundError(DotaCoreError):
     """Raised when the specified match ID cannot be found on OpenDota."""
 
 
+class ProfileNotFoundError(DotaCoreError):
+    """Raised when the specified player profile ID cannot be found on OpenDota."""
+
+
 class ReplayExpiredError(DotaCoreError):
     """Raised when Valve has already purged the replay from their servers."""
 

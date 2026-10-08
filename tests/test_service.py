@@ -46,6 +46,9 @@ def test_dotacore_service_delegations():
     with patch.object(service.api, "fetch_match", return_value="mock_match"):
         assert service.fetch_match(12345) == "mock_match"
 
+    with patch.object(service.api, "fetch_player_matches", return_value=["mock_player_match"]):
+        assert service.fetch_player_matches(86745124) == ["mock_player_match"]
+
     with patch.object(service.downloader, "detect_format", return_value="zstd"):
         assert service.detect_format(Path("fake.bz2")) == "zstd"
 

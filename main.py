@@ -25,10 +25,29 @@ def main() -> None:
         default=os.environ.get("DOTACORE_UI", "cli"),
         help="Frontend interface to launch (default: cli)",
     )
+    parser.add_argument(
+        "--profile",
+        "-p",
+        type=str,
+        default=None,
+        help="Player Profile ID to search recent matches for",
+    )
+    parser.add_argument(
+        "--match",
+        "-m",
+        type=str,
+        default=None,
+        help="Match ID to lookup directly",
+    )
     args, _ = parser.parse_known_args()
 
     api_key = os.environ.get("OPENDOTA_API_KEY")
-    launch_ui(name=args.ui, api_key=api_key)
+    launch_ui(
+        name=args.ui,
+        api_key=api_key,
+        profile_id=args.profile,
+        match_id=args.match,
+    )
 
 
 if __name__ == "__main__":

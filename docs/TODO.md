@@ -3,7 +3,7 @@
 - [ ] Add a monitoring mode that runs in the background to monitor a user for any games he may play to automatically backup the replay of
 - [ ] Backup replays in structured way
 - [ ] Add filtering option on which replays to backup
-- [ ] Accept profile ID as an option on match selection
+- [x] Accept profile ID as an option on match selection
 
 # Frontend Changes
 - [ ] Add desktop optimized GUI built using **flet**

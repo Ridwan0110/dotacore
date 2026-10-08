@@ -7,7 +7,7 @@ from .api import OpenDotaClient
 from .config import DEFAULT_REPLAY_DIR
 from .downloader import Downloader
 from .game_finder import DotaGameFinder
-from .models import MatchDetails, ReplaySource
+from .models import MatchDetails, PlayerMatchSummary, ReplaySource
 
 
 class DotaCoreService:
@@ -24,6 +24,15 @@ class DotaCoreService:
     def fetch_match(self, match_id: int) -> MatchDetails:
         """Fetch match metadata and scoreboard from OpenDota."""
         return self.api.fetch_match(match_id)
+
+    def fetch_player_matches(
+        self,
+        account_id: int,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[PlayerMatchSummary]:
+        """Fetch recent matches played by a player using their account ID."""
+        return self.api.fetch_player_matches(account_id, limit=limit, offset=offset)
 
     def resolve_replay_source(self, match: MatchDetails) -> Optional[ReplaySource]:
         """Determine direct Valve replay download coordinates and URL."""

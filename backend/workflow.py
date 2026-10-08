@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from .config import DEFAULT_REPLAY_DIR, VALVE_EXPIRY_THRESHOLD_DAYS
 from .exceptions import (
@@ -9,6 +9,7 @@ from .exceptions import (
     MatchNotFoundError,
     NetworkError,
     ParseTimeoutError,
+    ProfileNotFoundError,
     RateLimitExceededError,
     ReplayExpiredError,
 )
@@ -28,18 +29,37 @@ class WorkflowEngine:
         ui: BaseUI,
         service: Optional[DotaCoreService] = None,
         api_key: Optional[str] = None,
+        profile_id: Optional[Union[int, str]] = None,
+        match_id: Optional[Union[int, str]] = None,
     ):
         self.ui = ui
         self.service = service or DotaCoreService(api_key=api_key)
         self.output_directory: Path = self.service.default_output_dir
         self.auto_decompress: bool = True
         self.keep_archive: bool = False
+        self.profile_id = profile_id
+        self.match_id = match_id
 
     def run(self) -> None:
         """Start the interactive single-match session."""
         self.ui.show_banner()
         try:
-            self._run_single_match()
+            if self.profile_id is not None:
+                try:
+                    p_id = int(str(self.profile_id).strip())
+                    selected_match_id = self._run_profile_search(p_id)
+                    if selected_match_id is not None:
+                        self._run_match_workflow(selected_match_id)
+                except ValueError:
+                    self.ui.print_error(f"Invalid profile ID: {self.profile_id}")
+            elif self.match_id is not None:
+                try:
+                    m_id = int(str(self.match_id).strip())
+                    self._run_match_workflow(m_id)
+                except ValueError:
+                    self.ui.print_error(f"Invalid match ID: {self.match_id}")
+            else:
+                self._run_single_match()
         except KeyboardInterrupt:
             self.ui.print_warning("Operation canceled by user. Goodbye!")
 
@@ -49,10 +69,100 @@ class WorkflowEngine:
         """Execute lookup, scoreboard display, and optional download for one match."""
         self.ui.print_section("Match Selection")
 
-        match_id = self.ui.prompt_match_input()
-        if match_id is None:
+        selection = self.ui.prompt_match_input()
+        if selection is None:
             return
 
+        if isinstance(selection, tuple) and len(selection) == 2 and selection[0] == "profile":
+            account_id = selection[1]
+            match_id = self._run_profile_search(account_id)
+            if match_id is None:
+                return
+        elif isinstance(selection, int):
+            match_id = selection
+        else:
+            return
+
+        self._run_match_workflow(match_id)
+
+    def _run_profile_search(self, account_id: int) -> Optional[int]:
+        """
+        Interactive profile search section.
+        Loads 10 recent matches, allows loading more, displays table,
+        and returns the selected match_id based on the order chosen.
+        """
+        self.ui.print_section("Profile Search")
+        self.ui.print_info(f"Looking up recent matches for player profile #{account_id}...")
+
+        limit = 10
+        try:
+            matches = self.service.fetch_player_matches(account_id, limit=limit, offset=0)
+        except ProfileNotFoundError as exc:
+            self.ui.print_error(str(exc))
+            return None
+        except RateLimitExceededError as exc:
+            self.ui.print_warning(str(exc))
+            return None
+        except NetworkError as exc:
+            self.ui.print_error(f"Network error: {exc}")
+            return None
+        except DotaCoreError as exc:
+            self.ui.print_error(f"Error fetching player matches: {exc}")
+            return None
+
+        if not matches:
+            self.ui.print_warning(
+                f"No matches found for player profile #{account_id}. "
+                "The match history might be private or empty."
+            )
+            return None
+
+        # Display initial 10 matches
+        self.ui.display_profile_matches(matches, start_index=1)
+
+        can_load_more = (len(matches) % limit == 0)
+        while True:
+            choice = self.ui.prompt_profile_match_selection(
+                total_loaded=len(matches),
+                can_load_more=can_load_more,
+            )
+
+            if choice is None:
+                return None
+
+            if choice == "more":
+                self.ui.print_info("Loading more matches...")
+                try:
+                    more_matches = self.service.fetch_player_matches(
+                        account_id,
+                        limit=limit,
+                        offset=len(matches),
+                    )
+                except Exception as exc:
+                    self.ui.print_error(f"Failed to load more matches: {exc}")
+                    continue
+
+                if not more_matches:
+                    self.ui.print_warning("No more matches available for this player.")
+                    can_load_more = False
+                    continue
+
+                prev_count = len(matches)
+                matches.extend(more_matches)
+                can_load_more = (len(more_matches) == limit)
+                self.ui.display_profile_matches(more_matches, start_index=prev_count + 1)
+                continue
+
+            if isinstance(choice, int):
+                if 1 <= choice <= len(matches):
+                    selected = matches[choice - 1]
+                    self.ui.print_info(f"Loading match {selected.match_id} for more information...")
+                    return selected.match_id
+                else:
+                    self.ui.print_error(f"Selection {choice} is out of range.")
+
+    def _run_match_workflow(self, match_id: int) -> None:
+        """Execute lookup, scoreboard display, and optional download for a specific match ID."""
         self.ui.print_info(f"Looking up match {match_id} on OpenDota...")
 
         try:

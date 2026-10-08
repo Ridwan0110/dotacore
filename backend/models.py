@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 # Common Dota 2 game mode mappings
@@ -69,6 +70,48 @@ class PlayerScore:
         if not valid_items:
             return "No items"
         return ", ".join(valid_items)
+
+
+@dataclass
+class PlayerMatchSummary:
+    """Summary of a single match in a player's recent match history."""
+
+    match_id: int
+    start_time: Optional[int] = None
+    radiant_win: Optional[bool] = None
+    radiant_score: Optional[int] = None
+    dire_score: Optional[int] = None
+    player_slot: Optional[int] = None
+    kills: Optional[int] = None
+    deaths: Optional[int] = None
+    assists: Optional[int] = None
+    hero_id: Optional[int] = None
+
+    @property
+    def winner_name(self) -> str:
+        if self.radiant_win is True:
+            return "Radiant"
+        if self.radiant_win is False:
+            return "Dire"
+        return "Unknown"
+
+    @property
+    def date_display(self) -> str:
+        if not self.start_time:
+            return "Unknown"
+        try:
+            dt = datetime.fromtimestamp(self.start_time, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return "Unknown"
+
+    @property
+    def score_display(self) -> str:
+        if self.radiant_score is not None and self.dire_score is not None:
+            return f"{self.radiant_score} - {self.dire_score}"
+        if self.kills is not None and self.deaths is not None and self.assists is not None:
+            return f"{self.kills}/{self.deaths}/{self.assists}"
+        return "N/A"
 
 
 @dataclass

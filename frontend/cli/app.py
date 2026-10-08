@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from backend.service import DotaCoreService
 from backend.workflow import WorkflowEngine
@@ -12,10 +12,20 @@ from .ui import TerminalUI
 class CLIApp:
     """CLI application controller for DotaCore."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        profile_id: Optional[Union[int, str]] = None,
+        match_id: Optional[Union[int, str]] = None,
+    ):
         self.ui = TerminalUI()
         self.service = DotaCoreService(api_key=api_key)
-        self.workflow = WorkflowEngine(ui=self.ui, service=self.service)
+        self.workflow = WorkflowEngine(
+            ui=self.ui,
+            service=self.service,
+            profile_id=profile_id,
+            match_id=match_id,
+        )
 
     @property
     def api(self):
@@ -58,9 +68,14 @@ class CLIApp:
         self.workflow._run_single_match()
 
 
+DotaCoreApp = CLIApp
 
 
-def run_cli(api_key: Optional[str] = None) -> None:
+def run_cli(
+    api_key: Optional[str] = None,
+    profile_id: Optional[Union[int, str]] = None,
+    match_id: Optional[Union[int, str]] = None,
+) -> None:
     """Convenience launcher for the CLI application."""
-    app = CLIApp(api_key=api_key)
+    app = CLIApp(api_key=api_key, profile_id=profile_id, match_id=match_id)
     app.start()

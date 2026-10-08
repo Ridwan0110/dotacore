@@ -9,6 +9,7 @@ from backend.exceptions import (
     MatchNotFoundError,
     NetworkError,
     ParseTimeoutError,
+    ProfileNotFoundError,
     RateLimitExceededError,
     ReplayNotAvailableError,
 )
@@ -109,6 +110,145 @@ def test_fetch_match_network_error(client: OpenDotaClient):
     with patch.object(client.session, "get", side_effect=requests.ConnectionError("Connection lost")):
         with pytest.raises(NetworkError):
             client.fetch_match(123456)
+
+
+def test_fetch_player_matches_success(client: OpenDotaClient):
+    mock_player_matches_resp = MagicMock()
+    mock_player_matches_resp.ok = True
+    mock_player_matches_resp.status_code = 200
+    mock_player_matches_resp.json.return_value = [
+        {
+            "match_id": 9032315904,
+            "start_time": 1700000000,
+            "radiant_win": True,
+            "player_slot": 0,
+            "kills": 12,
+            "deaths": 3,
+            "assists": 15,
+            "hero_id": 1,
+        },
+        {
+            "match_id": 9032315905,
+            "start_time": 1699900000,
+            "radiant_win": False,
+            "player_slot": 128,
+            "kills": 5,
+            "deaths": 8,
+            "assists": 7,
+            "hero_id": 2,
+        },
+    ]
+
+    mock_match1_resp = MagicMock()
+    mock_match1_resp.ok = True
+    mock_match1_resp.status_code = 200
+    mock_match1_resp.json.return_value = {
+        "match_id": 9032315904,
+        "radiant_score": 40,
+        "dire_score": 25,
+        "duration": 2000,
+    }
+
+    mock_match2_resp = MagicMock()
+    mock_match2_resp.ok = True
+    mock_match2_resp.status_code = 200
+    mock_match2_resp.json.return_value = {
+        "match_id": 9032315905,
+        "radiant_score": 18,
+        "dire_score": 38,
+        "duration": 2200,
+    }
+
+    def mock_get(url, params=None, timeout=None):
+        if "players/86745124/matches" in url:
+            if params:
+                assert "project" not in params
+            return mock_player_matches_resp
+        if "matches/9032315904" in url:
+            return mock_match1_resp
+        if "matches/9032315905" in url:
+            return mock_match2_resp
+        return MagicMock(ok=False, status_code=404)
+
+    with patch.object(client.session, "get", side_effect=mock_get):
+        matches = client.fetch_player_matches(86745124, limit=10, offset=0)
+
+    assert len(matches) == 2
+    assert matches[0].match_id == 9032315904
+    assert matches[0].winner_name == "Radiant"
+    assert matches[0].date_display == "2023-11-14"
+    assert matches[0].score_display == "40 - 25"
+    assert matches[1].match_id == 9032315905
+    assert matches[1].winner_name == "Dire"
+    assert matches[1].date_display == "2023-11-13"
+    assert matches[1].score_display == "18 - 38"
+
+
+def test_fetch_player_matches_fallback_to_kda_when_scores_unavailable(client: OpenDotaClient):
+    mock_player_matches_resp = MagicMock()
+    mock_player_matches_resp.ok = True
+    mock_player_matches_resp.status_code = 200
+    mock_player_matches_resp.json.return_value = [
+        {
+            "match_id": 9032315904,
+            "start_time": 1700000000,
+            "radiant_win": True,
+            "player_slot": 0,
+            "kills": 8,
+            "deaths": 2,
+            "assists": 14,
+        }
+    ]
+
+    def mock_get(url, params=None, timeout=None):
+        if "players" in url:
+            return mock_player_matches_resp
+        return MagicMock(ok=False, status_code=500)
+
+    with patch.object(client.session, "get", side_effect=mock_get):
+        matches = client.fetch_player_matches(86745124, limit=10)
+
+    assert len(matches) == 1
+    assert matches[0].match_id == 9032315904
+    assert matches[0].date_display == "2023-11-14"
+    assert matches[0].score_display == "8/2/14"
+
+
+def test_fetch_player_matches_404(client: OpenDotaClient):
+    mock_response = MagicMock()
+    mock_response.ok = False
+    mock_response.status_code = 404
+
+    with patch.object(client.session, "get", return_value=mock_response):
+        with pytest.raises(ProfileNotFoundError):
+            client.fetch_player_matches(999999999)
+
+
+def test_fetch_player_matches_429(client: OpenDotaClient):
+    mock_response = MagicMock()
+    mock_response.ok = False
+    mock_response.status_code = 429
+
+    with patch.object(client.session, "get", return_value=mock_response):
+        with pytest.raises(RateLimitExceededError):
+            client.fetch_player_matches(86745124)
+
+
+def test_fetch_player_matches_network_error(client: OpenDotaClient):
+    with patch.object(client.session, "get", side_effect=requests.ConnectionError("Connection lost")):
+        with pytest.raises(NetworkError):
+            client.fetch_player_matches(86745124)
+
+
+def test_fetch_player_matches_empty(client: OpenDotaClient):
+    mock_response = MagicMock()
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mock_response.json.return_value = []
+
+    with patch.object(client.session, "get", return_value=mock_response):
+        matches = client.fetch_player_matches(86745124)
+    assert matches == []
 
 
 def test_resolve_replay_source_direct(client: OpenDotaClient):

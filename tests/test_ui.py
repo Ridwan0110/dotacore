@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import io
+from unittest.mock import patch
 import pytest
-from backend.models import MatchDetails, PlayerScore
+from backend.models import MatchDetails, PlayerMatchSummary, PlayerScore
 from frontend.cli import Style, TerminalUI, paint
 
 
@@ -24,6 +25,28 @@ from frontend.cli import Style, TerminalUI, paint
 )
 def test_parse_match_input(raw_input: str, expected_id: int | None):
     assert TerminalUI.parse_match_input(raw_input) == expected_id
+
+
+@pytest.mark.parametrize(
+    "raw_input, expected_id",
+    [
+        ("https://www.opendota.com/players/86745124", 86745124),
+        ("https://www.dotabuff.com/players/86745124", 86745124),
+        ("https://stratz.com/players/86745124?tab=matches", 86745124),
+        ("p 86745124", 86745124),
+        ("P: 86745124", 86745124),
+        ("profile 86745124", 86745124),
+        ("player 86745124", 86745124),
+        ("https://steamcommunity.com/profiles/76561198046779852", 86514124),
+        ("76561198046779852", 86514124),
+        ("", None),
+        ("   ", None),
+        ("invalid", None),
+        ("https://google.com", None),
+    ],
+)
+def test_parse_profile_input(raw_input: str, expected_id: int | None):
+    assert TerminalUI.parse_profile_input(raw_input) == expected_id
 
 
 def test_format_bytes():
@@ -126,6 +149,83 @@ def test_display_scoreboard_empty(capsys):
     TerminalUI.display_scoreboard(match)
     captured = capsys.readouterr().out
     assert "No player scoreboard details available" in captured
+
+
+def test_display_profile_matches(capsys):
+    matches = [
+        PlayerMatchSummary(
+            match_id=9032315904,
+            start_time=1700000000,
+            radiant_win=True,
+            radiant_score=42,
+            dire_score=28,
+        ),
+        PlayerMatchSummary(
+            match_id=9032315905,
+            start_time=1699900000,
+            radiant_win=False,
+            radiant_score=15,
+            dire_score=39,
+        ),
+    ]
+
+    TerminalUI.display_profile_matches(matches, start_index=1)
+    captured = capsys.readouterr().out
+
+    assert "Match ID" in captured
+    assert "Date" in captured
+    assert "Score" in captured
+    assert "Winner" in captured
+    assert "9032315904" in captured
+    assert "42 - 28" in captured
+    assert "Radiant" in captured
+    assert "9032315905" in captured
+    assert "15 - 39" in captured
+    assert "Dire" in captured
+
+
+def test_prompt_profile_match_selection():
+    # Selecting valid order number
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="3"):
+        res = TerminalUI.prompt_profile_match_selection(total_loaded=10, can_load_more=True)
+        assert res == 3
+
+    # Requesting to load more
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="m"):
+        res = TerminalUI.prompt_profile_match_selection(total_loaded=10, can_load_more=True)
+        assert res == "more"
+
+    # Quitting
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="q"):
+        res = TerminalUI.prompt_profile_match_selection(total_loaded=10, can_load_more=True)
+        assert res is None
+
+    # Invalid input then valid
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", side_effect=["99", "1"]):
+        res = TerminalUI.prompt_profile_match_selection(total_loaded=10, can_load_more=True)
+        assert res == 1
+
+
+def test_prompt_match_input_routing():
+    # Numeric match ID input
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="9032315904"):
+        res = TerminalUI.prompt_match_input()
+        assert res == 9032315904
+
+    # Profile prefix input
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="p 86745124"):
+        res = TerminalUI.prompt_match_input()
+        assert res == ("profile", 86745124)
+
+    # Profile URL input
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="https://www.opendota.com/players/86745124"):
+        res = TerminalUI.prompt_match_input()
+        assert res == ("profile", 86745124)
+
+    # Quit input
+    with patch("frontend.cli.ui.TerminalUI.prompt_input", return_value="q"):
+        res = TerminalUI.prompt_match_input()
+        assert res is None
 
 
 def test_render_download_progress(capsys):

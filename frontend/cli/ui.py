@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from backend.interfaces import BaseUI
-from backend.models import MatchDetails
+from backend.models import MatchDetails, PlayerMatchSummary
 from .styles import Style, paint
 
 
@@ -73,21 +73,114 @@ class TerminalUI(BaseUI):
 
         return None
 
-    @classmethod
-    def prompt_match_input(cls) -> Optional[int]:
-        """Prompt user until a valid match ID or exit command is given."""
-        while True:
-            raw = cls.prompt_input("Enter Match ID or Match URL (or 'q' to quit)")
-            if raw.lower() in ("q", "quit", "exit"):
+    @staticmethod
+    def parse_profile_input(user_input: str) -> Optional[int]:
+        """
+        Extract numeric 32-bit account ID from raw input or URL
+        (OpenDota player URL, Dotabuff player URL, Stratz player URL, Steam community profile,
+        or prefixes like 'p 86745124', 'profile: 86745124', 'player 86745124').
+        """
+        clean = user_input.strip()
+        if not clean:
+            return None
+
+        # 1. Check for player URL (e.g. /players/12345678)
+        player_url_match = re.search(r"players/(\d+)", clean, re.IGNORECASE)
+        if player_url_match:
+            try:
+                return int(player_url_match.group(1))
+            except ValueError:
                 return None
 
-            match_id = cls.parse_match_input(raw)
+        # 2. Check for Steam64 profiles URL (e.g. steamcommunity.com/profiles/76561198086745124)
+        steam64_url_match = re.search(r"profiles/(\d{17})", clean, re.IGNORECASE)
+        if steam64_url_match:
+            try:
+                steam64 = int(steam64_url_match.group(1))
+                return steam64 - 76561197960265728
+            except ValueError:
+                return None
+
+        # 3. Check for explicit prefix: p 12345, profile: 12345, player 12345, id: 12345
+        prefix_match = re.search(r"^(?:p|profile|player|account|id)\s*[:=]?\s*(\d+)$", clean, re.IGNORECASE)
+        if prefix_match:
+            try:
+                val = int(prefix_match.group(1))
+                if len(str(val)) == 17 and str(val).startswith("76561198"):
+                    return val - 76561197960265728
+                return val
+            except ValueError:
+                return None
+
+        # 4. Check for 17-digit raw Steam64 ID
+        if re.match(r"^76561198\d{9}$", clean):
+            try:
+                return int(clean) - 76561197960265728
+            except ValueError:
+                return None
+
+        return None
+
+    @classmethod
+    def prompt_profile_id_input(cls) -> Optional[int]:
+        """Prompt specifically for a player profile ID or URL."""
+        cls.print_section("Profile Search")
+        while True:
+            raw = cls.prompt_input("Enter Player Profile ID or URL (or 'q' to cancel)")
+            clean = raw.strip()
+            if clean.lower() in ("q", "quit", "exit", "cancel"):
+                return None
+
+            p_id = cls.parse_profile_input(clean)
+            if p_id is not None:
+                return p_id
+
+            if re.match(r"^\d{1,12}$", clean):
+                try:
+                    return int(clean)
+                except ValueError:
+                    pass
+
+            cls.print_error(
+                "Please enter a valid numeric Account ID (e.g. 86745124), "
+                "Steam ID, or OpenDota/Dotabuff player URL."
+            )
+
+    @classmethod
+    def prompt_match_input(cls) -> Optional[Union[int, tuple[str, int]]]:
+        """
+        Prompt user until a valid match ID, profile ID, or exit command is given.
+        Returns:
+            - int: match ID
+            - ('profile', account_id): profile search request
+            - None: quit
+        """
+        while True:
+            raw = cls.prompt_input(
+                "Enter Match ID/URL, Profile ID (prefix 'p' e.g. 'p 86745124'), or 'q' to quit"
+            )
+            clean = raw.strip()
+            if clean.lower() in ("q", "quit", "exit"):
+                return None
+
+            if clean.lower() in ("p", "profile", "player"):
+                profile_id = cls.prompt_profile_id_input()
+                if profile_id is not None:
+                    return ("profile", profile_id)
+                continue
+
+            profile_id = cls.parse_profile_input(clean)
+            if profile_id is not None:
+                return ("profile", profile_id)
+
+            match_id = cls.parse_match_input(clean)
             if match_id is not None:
                 return match_id
 
             cls.print_error(
-                "Could not detect a valid match ID. "
-                "Please enter a numeric ID (e.g. 8123456789) or a Dotabuff/OpenDota URL."
+                "Could not detect a valid Match ID or Profile ID.\n"
+                "  - Match: Enter numeric match ID (e.g. 9032315904) or match URL.\n"
+                "  - Profile: Enter 'p <id>' (e.g. p 86745124), player URL, or type 'p'."
             )
 
     @staticmethod
@@ -114,6 +207,73 @@ class TerminalUI(BaseUI):
         except EOFError:
             return default
 
+    @classmethod
+    def display_profile_matches(
+        cls,
+        matches: list[PlayerMatchSummary],
+        start_index: int = 1,
+    ) -> None:
+        """
+        Render a clean table of player matches.
+        Strict requirement: only show match ID, date, score, and winner (plus selection order).
+        """
+        if not matches:
+            cls.print_info("No matches to display.")
+            return
+
+        sep = paint("-" * 62, Style.GRAY)
+        print(f"\n{sep}")
+        header = f" {'#':<4} {'Match ID':<13} {'Date':<13} {'Score':<13} {'Winner'}"
+        print(paint(header, Style.BOLD))
+        print(sep)
+
+        for i, m in enumerate(matches, start=start_index):
+            winner_color = Style.GREEN if m.radiant_win is True else (Style.RED if m.radiant_win is False else Style.GRAY)
+            winner_str = paint(m.winner_name, winner_color, bold=True)
+            row = (
+                f" {i:<4} "
+                f"{paint(str(m.match_id), Style.CYAN):<22} "
+                f"{m.date_display:<13} "
+                f"{m.score_display:<13} "
+                f"{winner_str}"
+            )
+            print(row)
+
+        print(f"{sep}\n")
+
+    @classmethod
+    def prompt_profile_match_selection(
+        cls,
+        total_loaded: int,
+        can_load_more: bool = True,
+    ) -> Optional[Union[int, str]]:
+        """
+        Prompt user to select a match order number, request to load more, or quit.
+        Returns:
+            - int: The 1-based order index of the selected match.
+            - "more": If the user requested to load more matches.
+            - None: If the user chose to quit.
+        """
+        more_hint = ", 'm' to load more" if can_load_more else ""
+        prompt_msg = f"Select match order (1-{total_loaded}){more_hint}, or 'q' to quit"
+
+        while True:
+            raw = cls.prompt_input(prompt_msg).strip().lower()
+            if raw in ("q", "quit", "exit"):
+                return None
+            if can_load_more and raw in ("m", "more", "load more", "load"):
+                return "more"
+
+            try:
+                val = int(raw)
+                if 1 <= val <= total_loaded:
+                    return val
+                cls.print_error(f"Please select a number between 1 and {total_loaded}.")
+            except ValueError:
+                cls.print_error(
+                    f"Invalid selection. Enter 1-{total_loaded}{more_hint}, or 'q' to quit."
+                )
+
     @staticmethod
     def display_match_card(match: MatchDetails) -> None:
         """Render a clean card displaying match overview information."""
@@ -135,7 +295,7 @@ class TerminalUI(BaseUI):
         print(f" {paint('Mode:', Style.BOLD)}      {match.game_mode_name} ({match.lobby_type_name})")
         print(f" {paint('Duration:', Style.BOLD)}  {match.duration_formatted}")
         print(f" {paint('Played:', Style.BOLD)}    {match.relative_age_display}")
-        print(f"{border}\n")
+        print(f"{border}\\n")
 
     @classmethod
     def display_scoreboard(cls, match: MatchDetails) -> None:

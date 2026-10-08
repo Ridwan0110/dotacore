@@ -65,7 +65,7 @@ def launch_ui(
     # 1. If target is a BaseUI class or instance
     if (isinstance(target, type) and issubclass(target, BaseUI)) or isinstance(target, BaseUI):
         ui_instance = target() if isinstance(target, type) else target
-        engine = WorkflowEngine(ui=ui_instance, service=service, api_key=api_key)
+        engine = WorkflowEngine(ui=ui_instance, service=service, api_key=api_key, **kwargs)
         return engine.run()
 
     # 2. If target is a class with start() or run()

@@ -19,13 +19,14 @@ from .exceptions import (
     MatchNotFoundError,
     NetworkError,
     ParseTimeoutError,
+    ProfileNotFoundError,
     RateLimitExceededError,
     ReplayExpiredError,
     ReplayNotAvailableError,
 )
 from .game_finder import DotaGameFinder
 from .interfaces import BaseUI
-from .models import MatchDetails, PlayerScore, ReplaySource
+from .models import MatchDetails, PlayerMatchSummary, PlayerScore, ReplaySource
 from .service import DotaCoreService
 from .workflow import WorkflowEngine
 
@@ -46,7 +47,9 @@ __all__ = [
     "PARSE_POLL_INTERVAL_SECONDS",
     "PARSE_POLL_TIMEOUT_SECONDS",
     "ParseTimeoutError",
+    "PlayerMatchSummary",
     "PlayerScore",
+    "ProfileNotFoundError",
     "REQUEST_TIMEOUT_SECONDS",
     "RateLimitExceededError",
     "ReplayExpiredError",
