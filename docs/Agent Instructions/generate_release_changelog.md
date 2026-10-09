@@ -4,7 +4,7 @@
 
 ## Pre-execution Instructions
 
-Verify a `.json` file will be provided alongside the instruction. If not given, don't continue.
+Verify a `.json` file has been provided alongside the instruction. If not given, don't continue.
 
 ## Execution Instructions:
 
