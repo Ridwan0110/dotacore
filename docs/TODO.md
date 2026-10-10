@@ -14,4 +14,4 @@
 - [x] Modularize the backend and separate the frontend. Backend being independent and frontend being dependent.
 
 # Repo Changes
-- [ ] Automatically update version in `README.md` with each release.
+- [x] Automatically update version in `README.md` with each release.
